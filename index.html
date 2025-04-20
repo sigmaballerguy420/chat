@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chatroom</title>
+    <!-- Emoji Picker CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/dist/emoji-picker.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            gap: 20px;
+            background-color: #f5f5f5;
+        }
+        #sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        #chat-container {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            height: 500px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #user-list, #room-list {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            height: 150px;
+            overflow-y: auto;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #message-input {
+            width: 70%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        #send-button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        #send-button:hover {
+            background-color: #45a049;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            line-height: 1.4;
+        }
+        .user-message {
+            background-color: #e6f7ff;
+            text-align: right;
+            margin-left: 20%;
+        }
+        .other-message {
+            background-color: #f0f0f0;
+            margin-right: 20%;
+        }
+        .system-message {
+            background-color: #ffe6e6;
+            font-style: italic;
+            text-align: center;
+            margin: 10px auto;
+            max-width: 80%;
+        }
+        .room-button {
+            display: block;
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 5px;
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .room-button:hover {
+            background-color: #e0e0e0;
+        }
+        .room-button.active {
+            background-color: #4CAF50;
+            color: white;
+            border-color: #45a049;
+        }
+        #room-controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 5px;
+        }
+        #new-room-input {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
+        #create-room-button {
+            padding: 8px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .toolbar-button {
+            padding: 8px 12px;
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .toolbar-button:hover {
+            background: #e0e0e0;
+        }
+        emoji-picker {
+            position: absolute;
+            bottom: 70px;
+            right: 20px;
+            z-index: 100;
+            display: none;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            width: 350px;
+            height: 400px;
+        }
+        .message img.emoji {
+            height: 20px;
+            width: 20px;
+            vertical-align: middle;
+        }
+        .message img.chat-image {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            margin-top: 8px;
+            display: block;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #image-preview {
+            display: none;
+            max-width: 200px;
+            margin: 8px 0;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        #file-input {
+            display: none;
+        }
+        .message-info {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        .typing-indicator {
+            font-style: italic;
+            color: #666;
+            margin: 5px 0;
+            height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div>
+            <h3>Rooms</h3>
+            <div id="room-list">
+                <button class="room-button active" data-room="general">General</button>
+                <button class="room-button" data-room="random">Random</button>
+                <button class="room-button" data-room="help">Help</button>
+            </div>
+            <div id="room-controls">
+                <input type="text" id="new-room-input" placeholder="New room name">
+                <button id="create-room-button">+</button>
+            </div>
+        </div>
+        <div>
+            <h3>Online Users</h3>
+            <div id="user-list"></div>
+        </div>
+    </div>
+    
+    <div id="main-content">
+        <h1 id="room-title">Room: General</h1>
+        
+        <div class="toolbar">
+            <button class="toolbar-button" id="emoji-button">😀 Emoji</button>
+            <button class="toolbar-button" id="image-button">🖼️ Image</button>
+            <input type="file" id="file-input" accept="image/*">
+            <img id="image-preview" alt="Image preview">
+        </div>
+        
+        <div id="chat-container"></div>
+        <div class="typing-indicator" id="typing-indicator"></div>
+        
+        <div>
+            <input type="text" id="message-input" placeholder="Type your message here..." autocomplete="off">
+            <button id="send-button">Send</button>
+        </div>
+    </div>
+
+    <emoji-picker id="emoji-picker"></emoji-picker>
+
+    <!-- Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/dist/emoji-picker.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.4.0/purify.min.js"></script>
+
+    <script>
+        // ===== CONFIGURATION =====
+        const NGROK_URL = "wss://8f61-2600-6c5d-5100-dc2-00-1f79.ngrok-free.app";
+        const DEFAULT_ROOM = "general";
+        const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
+        const TYPING_DELAY = 2000; // 2 seconds
+        // =========================
+
+        // DOM Elements
+        const chatContainer = document.getElementById('chat-container');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const userList = document.getElementById('user-list');
+        const roomList = document.getElementById('room-list');
+        const newRoomInput = document.getElementById('new-room-input');
+        const createRoomButton = document.getElementById('create-room-button');
+        const roomTitle = document.getElementById('room-title');
+        const emojiButton = document.getElementById('emoji-button');
+        const emojiPicker = document.getElementById('emoji-picker');
+        const imageButton = document.getElementById('image-button');
+        const fileInput = document.getElementById('file-input');
+        const imagePreview = document.getElementById('image-preview');
+        const typingIndicator = document.getElementById('typing-indicator');
+
+        // Application state
+        let username = localStorage.getItem('chat-username') || '';
+        let currentRoom = DEFAULT_ROOM;
+        let users = [];
+        let rooms = ['general', 'random', 'help'];
+        let typingTimer = null;
+        let isTyping = false;
+
+        // Initialize
+        if (!username) {
+            username = prompt('Enter your username:') || 'Anonymous';
+            localStorage.setItem('chat-username', username);
+        }
+
+        // Connect to WebSocket server
+        const socket = new WebSocket(NGROK_URL);
+        
+        // Initialize UI
+        updateRoomList();
+        roomTitle.textContent = `Room: ${currentRoom}`;
+
+        // Event Listeners
+        socket.addEventListener('open', handleSocketOpen);
+        socket.addEventListener('message', handleSocketMessage);
+        socket.addEventListener('close', handleSocketClose);
+        socket.addEventListener('error', handleSocketError);
+        
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+        
+        createRoomButton.addEventListener('click', createRoom);
+        newRoomInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') createRoom();
+        });
+
+        // Room selection
+        document.querySelectorAll('.room-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const room = button.dataset.room;
+                if (room && room !== currentRoom) {
+                    joinRoom(room);
+                }
+            });
+        });
+
+        // Typing detection
+        messageInput.addEventListener('input', () => {
+            if (!isTyping) {
+                isTyping = true;
+                socket.send(JSON.stringify({
+                    type: 'typing',
+                    username: username,
+                    room: currentRoom,
+                    isTyping: true
+                }));
+            }
+            
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => {
+                isTyping = false;
+                socket.send(JSON.stringify({
+                    type: 'typing',
+                    username: username,
+                    room: currentRoom,
+                    isTyping: false
+                }));
+            }, TYPING_DELAY);
+        });
+
+        // Emoji picker
+        emojiButton.addEventListener('click', () => {
+            emojiPicker.style.display = emojiPicker.style.display === 'block' ? 'none' : 'block';
+        });
+        
+        emojiPicker.addEventListener('emoji-click', (event) => {
+            messageInput.value += event.detail.unicode;
+            messageInput.focus();
+        });
+
+        // Close emoji picker when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!emojiPicker.contains(e.target) && e.target !== emojiButton) {
+                emojiPicker.style.display = 'none';
+            }
+        });
+
+        // Image upload
+        imageButton.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleImageUpload);
+
+        // Functions
+        function handleSocketOpen() {
+            addSystemMessage('Connected to chat server');
+            joinRoom(currentRoom);
+        }
+
+        function handleSocketMessage(event) {
+            try {
+                const data = JSON.parse(event.data);
+                
+                switch(data.type) {
+                    case 'message':
+                        if (data.room === currentRoom) {
+                            addMessage(data.username, data.message, data.username === username);
+                        }
+                        break;
+                    case 'notification':
+                        if (!data.room || data.room === currentRoom) {
+                            addSystemMessage(data.message);
+                        }
+                        break;
+                    case 'user_list':
+                        users = data.users;
+                        updateUserList();
+                        break;
+                    case 'room_list':
+                        // Only update rooms if they're different
+                        if (JSON.stringify(data.rooms) !== JSON.stringify(rooms)) {
+                            rooms = data.rooms;
+                            updateRoomList();
+                        }
+                        break;
+                    case 'history':
+                        if (data.room === currentRoom) {
+                            data.messages.forEach(msg => {
+                                if (msg.type === 'image') {
+                                    addImageMessage(msg.username, msg.imageData, msg.fileName, msg.username === username, true);
+                                } else {
+                                    addMessage(msg.username, msg.message, msg.username === username, true);
+                                }
+                            });
+                        }
+                        break;
+                    case 'image':
+                        if (data.room === currentRoom) {
+                            addImageMessage(data.username, data.imageData, data.fileName, data.username === username);
+                        }
+                        break;
+                    case 'typing':
+                        if (data.room === currentRoom && data.username !== username) {
+                            typingIndicator.textContent = data.isTyping ? `${data.username} is typing...` : '';
+                        }
+                        break;
+                }
+            } catch (e) {
+                console.error('Error parsing message:', e);
+            }
+        }
+
+        function handleSocketClose() {
+            addSystemMessage('Disconnected from chat server');
+        }
+
+        function handleSocketError(error) {
+            addSystemMessage('WebSocket error occurred');
+            console.error('WebSocket error:', error);
+        }
+
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'message',
+                    username: username,
+                    message: message,
+                    room: currentRoom
+                }));
+                messageInput.value = '';
+            }
+        }
+
+        function joinRoom(room) {
+            currentRoom = room;
+            roomTitle.textContent = `Room: ${room}`;
+            chatContainer.innerHTML = '';
+            typingIndicator.textContent = '';
+            
+            // Update active room button
+            document.querySelectorAll('.room-button').forEach(button => {
+                button.classList.toggle('active', button.dataset.room === room);
+            });
+            
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'join',
+                    username: username,
+                    room: room
+                }));
+            }
+        }
+
+        function createRoom() {
+            const roomName = newRoomInput.value.trim();
+            if (roomName && !rooms.includes(roomName)) {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'create_room',
+                        room: roomName
+                    }));
+                }
+                newRoomInput.value = '';
+            }
+        }
+
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!file.type.match('image.*')) {
+                alert('Please select an image file (JPEG, PNG, GIF)');
+                return;
+            }
+
+            if (file.size > MAX_IMAGE_SIZE) {
+                alert('Image too large (max 2MB)');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+                
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'image',
+                        username: username,
+                        room: currentRoom,
+                        imageData: e.target.result,
+                        fileName: file.name
+                    }));
+                }
+                
+                fileInput.value = '';
+                setTimeout(() => {
+                    imagePreview.style.display = 'none';
+                }, 3000);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function addMessage(sender, message, isUser, isHistory = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'other-message'}`;
+            
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            if (isHistory) {
+                messageDiv.style.opacity = '0.7';
+                messageDiv.innerHTML = `
+                    <div class="message-info">${sender} • ${timeString}</div>
+                    <div>${message}</div>
+                `;
+                chatContainer.insertBefore(messageDiv, chatContainer.firstChild);
+            } else {
+                messageDiv.innerHTML = `
+                    <div class="message-info">${sender} • ${timeString}</div>
+                    <div>${message}</div>
+                `;
+                chatContainer.appendChild(messageDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+
+        function addImageMessage(sender, imageData, fileName, isUser, isHistory = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'other-message'}`;
+            
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const cleanHTML = DOMPurify.sanitize(`
+                <div class="message-info">${sender} • ${timeString}</div>
+                <div>${fileName}</div>
+                <img class="chat-image" src="${imageData}" alt="Shared image">
+            `);
+            
+            if (isHistory) {
+                messageDiv.style.opacity = '0.7';
+                messageDiv.innerHTML = cleanHTML;
+                chatContainer.insertBefore(messageDiv, chatContainer.firstChild);
+            } else {
+                messageDiv.innerHTML = cleanHTML;
+                chatContainer.appendChild(messageDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+
+        function addSystemMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message system-message';
+            messageDiv.textContent = message;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function updateUserList() {
+            userList.innerHTML = '';
+            users.forEach(user => {
+                const userElement = document.createElement('div');
+                userElement.textContent = user;
+                userList.appendChild(userElement);
+            });
+        }
+
+        function updateRoomList() {
+            // Keep the existing room buttons and just add new ones
+            const existingRooms = new Set(
+                Array.from(document.querySelectorAll('.room-button'))
+                    .map(btn => btn.dataset.room)
+            );
+            
+            rooms.forEach(room => {
+                if (!existingRooms.has(room)) {
+                    const roomButton = document.createElement('button');
+                    roomButton.className = 'room-button';
+                    roomButton.dataset.room = room;
+                    if (room === currentRoom) roomButton.classList.add('active');
+                    roomButton.textContent = room;
+                    roomButton.addEventListener('click', () => joinRoom(room));
+                    roomList.appendChild(roomButton);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
