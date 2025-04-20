@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebSocket Chatroom</title>
-    <!-- Emoji Picker CSS -->
     <link href="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/dist/emoji-picker.min.css" rel="stylesheet">
     <style>
         body {
@@ -183,17 +182,32 @@
             margin: 5px 0;
             height: 20px;
         }
+        .media-container {
+            margin-top: 8px;
+            max-width: 100%;
+        }
+        video.chat-video {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            background: #000;
+        }
+        audio.chat-audio {
+            width: 100%;
+            margin-top: 8px;
+        }
+        .media-message {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
     <div id="sidebar">
         <div>
             <h3>Rooms</h3>
-            <div id="room-list">
-                <button class="room-button active" data-room="general">General</button>
-                <button class="room-button" data-room="random">Random</button>
-                <button class="room-button" data-room="help">Help</button>
-            </div>
+            <div id="room-list"></div>
             <div id="room-controls">
                 <input type="text" id="new-room-input" placeholder="New room name">
                 <button id="create-room-button">+</button>
@@ -211,7 +225,11 @@
         <div class="toolbar">
             <button class="toolbar-button" id="emoji-button">😀 Emoji</button>
             <button class="toolbar-button" id="image-button">🖼️ Image</button>
-            <input type="file" id="file-input" accept="image/*">
+            <button class="toolbar-button" id="video-button">🎬 Video</button>
+            <button class="toolbar-button" id="audio-button">🎵 Audio</button>
+            <input type="file" id="file-input" accept="image/*" style="display:none">
+            <input type="file" id="video-input" accept="video/*" style="display:none">
+            <input type="file" id="audio-input" accept="audio/*" style="display:none">
             <img id="image-preview" alt="Image preview">
         </div>
         
@@ -226,17 +244,15 @@
 
     <emoji-picker id="emoji-picker"></emoji-picker>
 
-    <!-- Dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/dist/emoji-picker.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.4.0/purify.min.js"></script>
 
     <script>
-        // ===== CONFIGURATION =====
+        // Configuration
         const NGROK_URL = "wss://268e-2600-6c5d-5100-dc2-00-1f79.ngrok-free.app";
         const DEFAULT_ROOM = "general";
-        const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
+        const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
         const TYPING_DELAY = 2000; // 2 seconds
-        // =========================
 
         // DOM Elements
         const chatContainer = document.getElementById('chat-container');
@@ -250,7 +266,11 @@
         const emojiButton = document.getElementById('emoji-button');
         const emojiPicker = document.getElementById('emoji-picker');
         const imageButton = document.getElementById('image-button');
+        const videoButton = document.getElementById('video-button');
+        const audioButton = document.getElementById('audio-button');
         const fileInput = document.getElementById('file-input');
+        const videoInput = document.getElementById('video-input');
+        const audioInput = document.getElementById('audio-input');
         const imagePreview = document.getElementById('image-preview');
         const typingIndicator = document.getElementById('typing-indicator');
 
@@ -273,7 +293,7 @@
         
         // Initialize UI
         updateRoomList();
-        roomTitle.textContent = `Room: ${currentRoom}`;
+        joinRoom(DEFAULT_ROOM);
 
         // Event Listeners
         socket.addEventListener('open', handleSocketOpen);
@@ -282,69 +302,34 @@
         socket.addEventListener('error', handleSocketError);
         
         sendButton.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
+        messageInput.addEventListener('keypress', (e) => e.key === 'Enter' && sendMessage());
         
         createRoomButton.addEventListener('click', createRoom);
-        newRoomInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') createRoom();
-        });
+        newRoomInput.addEventListener('keypress', (e) => e.key === 'Enter' && createRoom());
 
-        // Room selection
-        document.querySelectorAll('.room-button').forEach(button => {
-            button.addEventListener('click', () => {
-                const room = button.dataset.room;
-                if (room && room !== currentRoom) {
-                    joinRoom(room);
-                }
-            });
-        });
+        // Media upload buttons
+        imageButton.addEventListener('click', () => fileInput.click());
+        videoButton.addEventListener('click', () => videoInput.click());
+        audioButton.addEventListener('click', () => audioInput.click());
+        
+        fileInput.addEventListener('change', () => handleFileUpload(fileInput, 'image'));
+        videoInput.addEventListener('change', () => handleFileUpload(videoInput, 'video'));
+        audioInput.addEventListener('change', () => handleFileUpload(audioInput, 'audio'));
 
         // Typing detection
-        messageInput.addEventListener('input', () => {
-            if (!isTyping) {
-                isTyping = true;
-                socket.send(JSON.stringify({
-                    type: 'typing',
-                    username: username,
-                    room: currentRoom,
-                    isTyping: true
-                }));
-            }
-            
-            clearTimeout(typingTimer);
-            typingTimer = setTimeout(() => {
-                isTyping = false;
-                socket.send(JSON.stringify({
-                    type: 'typing',
-                    username: username,
-                    room: currentRoom,
-                    isTyping: false
-                }));
-            }, TYPING_DELAY);
-        });
+        messageInput.addEventListener('input', handleTyping);
 
         // Emoji picker
-        emojiButton.addEventListener('click', () => {
-            emojiPicker.style.display = emojiPicker.style.display === 'block' ? 'none' : 'block';
-        });
-        
-        emojiPicker.addEventListener('emoji-click', (event) => {
-            messageInput.value += event.detail.unicode;
+        emojiButton.addEventListener('click', toggleEmojiPicker);
+        emojiPicker.addEventListener('emoji-click', (e) => {
+            messageInput.value += e.detail.unicode;
             messageInput.focus();
         });
-
-        // Close emoji picker when clicking elsewhere
         document.addEventListener('click', (e) => {
             if (!emojiPicker.contains(e.target) && e.target !== emojiButton) {
                 emojiPicker.style.display = 'none';
             }
         });
-
-        // Image upload
-        imageButton.addEventListener('click', () => fileInput.click());
-        fileInput.addEventListener('change', handleImageUpload);
 
         // Functions
         function handleSocketOpen() {
@@ -358,31 +343,34 @@
                 
                 switch(data.type) {
                     case 'message':
-                        if (data.room === currentRoom) {
-                            addMessage(data.username, data.message, data.username === username);
-                        }
+                        if (data.room === currentRoom) addMessage(data.username, data.message, data.username === username);
                         break;
                     case 'notification':
-                        if (!data.room || data.room === currentRoom) {
-                            addSystemMessage(data.message);
-                        }
+                        if (!data.room || data.room === currentRoom) addSystemMessage(data.message);
                         break;
                     case 'user_list':
                         users = data.users;
                         updateUserList();
                         break;
                     case 'room_list':
-                        // Only update rooms if they're different
-                        if (JSON.stringify(data.rooms) !== JSON.stringify(rooms)) {
-                            rooms = data.rooms;
-                            updateRoomList();
+                        if (Array.isArray(data.rooms)) {
+                            // Extract just room names if they come as objects
+                            const newRooms = data.rooms.map(room => typeof room === 'object' ? room.name : room);
+                            if (JSON.stringify(newRooms) !== JSON.stringify(rooms)) {
+                                rooms = newRooms;
+                                updateRoomList();
+                            }
                         }
                         break;
                     case 'history':
                         if (data.room === currentRoom) {
                             data.messages.forEach(msg => {
                                 if (msg.type === 'image') {
-                                    addImageMessage(msg.username, msg.imageData, msg.fileName, msg.username === username, true);
+                                    addImageMessage(msg.username, msg.fileData, msg.fileName, msg.username === username, true);
+                                } else if (msg.type === 'video') {
+                                    addVideoMessage(msg.username, msg.fileData, msg.fileName, msg.username === username, true);
+                                } else if (msg.type === 'audio') {
+                                    addAudioMessage(msg.username, msg.fileData, msg.fileName, msg.username === username, true);
                                 } else {
                                     addMessage(msg.username, msg.message, msg.username === username, true);
                                 }
@@ -390,9 +378,13 @@
                         }
                         break;
                     case 'image':
-                        if (data.room === currentRoom) {
-                            addImageMessage(data.username, data.imageData, data.fileName, data.username === username);
-                        }
+                        if (data.room === currentRoom) addImageMessage(data.username, data.fileData, data.fileName, data.username === username);
+                        break;
+                    case 'video':
+                        if (data.room === currentRoom) addVideoMessage(data.username, data.fileData, data.fileName, data.username === username);
+                        break;
+                    case 'audio':
+                        if (data.room === currentRoom) addAudioMessage(data.username, data.fileData, data.fileName, data.username === username);
                         break;
                     case 'typing':
                         if (data.room === currentRoom && data.username !== username) {
@@ -435,7 +427,7 @@
             
             // Update active room button
             document.querySelectorAll('.room-button').forEach(button => {
-                button.classList.toggle('active', button.dataset.room === room);
+                button.classList.toggle('active', button.textContent === room);
             });
             
             if (socket.readyState === WebSocket.OPEN) {
@@ -450,6 +442,8 @@
         function createRoom() {
             const roomName = newRoomInput.value.trim();
             if (roomName && !rooms.includes(roomName)) {
+                rooms.push(roomName);
+                updateRoomList();
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({
                         type: 'create_room',
@@ -460,41 +454,65 @@
             }
         }
 
-        function handleImageUpload(event) {
-            const file = event.target.files[0];
+        function handleFileUpload(input, type) {
+            const file = input.files[0];
             if (!file) return;
 
-            if (!file.type.match('image.*')) {
-                alert('Please select an image file (JPEG, PNG, GIF)');
-                return;
-            }
-
-            if (file.size > MAX_IMAGE_SIZE) {
-                alert('Image too large (max 2MB)');
+            if (file.size > MAX_FILE_SIZE) {
+                alert(`File too large (max ${MAX_FILE_SIZE/1024/1024}MB)`);
                 return;
             }
 
             const reader = new FileReader();
             reader.onload = (e) => {
-                imagePreview.src = e.target.result;
-                imagePreview.style.display = 'block';
-                
+                if (type === 'image') {
+                    imagePreview.src = e.target.result;
+                    imagePreview.style.display = 'block';
+                }
+
                 if (socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({
-                        type: 'image',
+                        type: type,
                         username: username,
                         room: currentRoom,
-                        imageData: e.target.result,
+                        fileData: e.target.result,
                         fileName: file.name
                     }));
                 }
-                
-                fileInput.value = '';
-                setTimeout(() => {
-                    imagePreview.style.display = 'none';
-                }, 3000);
+
+                input.value = '';
+                if (type === 'image') {
+                    setTimeout(() => imagePreview.style.display = 'none', 3000);
+                }
             };
             reader.readAsDataURL(file);
+        }
+
+        function handleTyping() {
+            if (!isTyping) {
+                isTyping = true;
+                socket.send(JSON.stringify({
+                    type: 'typing',
+                    username: username,
+                    room: currentRoom,
+                    isTyping: true
+                }));
+            }
+            
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => {
+                isTyping = false;
+                socket.send(JSON.stringify({
+                    type: 'typing',
+                    username: username,
+                    room: currentRoom,
+                    isTyping: false
+                }));
+            }, TYPING_DELAY);
+        }
+
+        function toggleEmojiPicker() {
+            emojiPicker.style.display = emojiPicker.style.display === 'block' ? 'none' : 'block';
         }
 
         function addMessage(sender, message, isUser, isHistory = false) {
@@ -503,18 +521,15 @@
             
             const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             
+            messageDiv.innerHTML = `
+                <div class="message-info">${sender} • ${timeString}</div>
+                <div>${message}</div>
+            `;
+            
             if (isHistory) {
                 messageDiv.style.opacity = '0.7';
-                messageDiv.innerHTML = `
-                    <div class="message-info">${sender} • ${timeString}</div>
-                    <div>${message}</div>
-                `;
                 chatContainer.insertBefore(messageDiv, chatContainer.firstChild);
             } else {
-                messageDiv.innerHTML = `
-                    <div class="message-info">${sender} • ${timeString}</div>
-                    <div>${message}</div>
-                `;
                 chatContainer.appendChild(messageDiv);
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
@@ -527,17 +542,60 @@
             const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const cleanHTML = DOMPurify.sanitize(`
                 <div class="message-info">${sender} • ${timeString}</div>
-                <div>${fileName}</div>
+                <div class="media-message">${fileName}</div>
                 <img class="chat-image" src="${imageData}" alt="Shared image">
             `);
             
+            messageDiv.innerHTML = cleanHTML;
+            appendMessage(messageDiv, isHistory);
+        }
+
+        function addVideoMessage(sender, videoData, fileName, isUser, isHistory = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'other-message'}`;
+            
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const cleanHTML = DOMPurify.sanitize(`
+                <div class="message-info">${sender} • ${timeString}</div>
+                <div class="media-message">${fileName}</div>
+                <div class="media-container">
+                    <video class="chat-video" controls>
+                        <source src="${videoData}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                </div>
+            `);
+            
+            messageDiv.innerHTML = cleanHTML;
+            appendMessage(messageDiv, isHistory);
+        }
+
+        function addAudioMessage(sender, audioData, fileName, isUser, isHistory = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'other-message'}`;
+            
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const cleanHTML = DOMPurify.sanitize(`
+                <div class="message-info">${sender} • ${timeString}</div>
+                <div class="media-message">${fileName}</div>
+                <div class="media-container">
+                    <audio class="chat-audio" controls>
+                        <source src="${audioData}" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                </div>
+            `);
+            
+            messageDiv.innerHTML = cleanHTML;
+            appendMessage(messageDiv, isHistory);
+        }
+
+        function appendMessage(element, isHistory) {
             if (isHistory) {
-                messageDiv.style.opacity = '0.7';
-                messageDiv.innerHTML = cleanHTML;
-                chatContainer.insertBefore(messageDiv, chatContainer.firstChild);
+                element.style.opacity = '0.7';
+                chatContainer.insertBefore(element, chatContainer.firstChild);
             } else {
-                messageDiv.innerHTML = cleanHTML;
-                chatContainer.appendChild(messageDiv);
+                chatContainer.appendChild(element);
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
         }
@@ -560,22 +618,18 @@
         }
 
         function updateRoomList() {
-            // Keep the existing room buttons and just add new ones
-            const existingRooms = new Set(
-                Array.from(document.querySelectorAll('.room-button'))
-                    .map(btn => btn.dataset.room)
-            );
-            
+            roomList.innerHTML = '';
             rooms.forEach(room => {
-                if (!existingRooms.has(room)) {
-                    const roomButton = document.createElement('button');
-                    roomButton.className = 'room-button';
-                    roomButton.dataset.room = room;
-                    if (room === currentRoom) roomButton.classList.add('active');
-                    roomButton.textContent = room;
-                    roomButton.addEventListener('click', () => joinRoom(room));
-                    roomList.appendChild(roomButton);
-                }
+                // Ensure we're only dealing with strings
+                const roomName = typeof room === 'object' ? room.name : room;
+                if (typeof roomName !== 'string') return;
+                
+                const roomButton = document.createElement('button');
+                roomButton.className = 'room-button';
+                if (roomName === currentRoom) roomButton.classList.add('active');
+                roomButton.textContent = roomName;
+                roomButton.addEventListener('click', () => joinRoom(roomName));
+                roomList.appendChild(roomButton);
             });
         }
     </script>
